@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<title>Bewerbung</title>
+<link rel="icon" href="data:,">
+<!-- Loader für das verschlüsselte Hosting (tools/pages.mjs). Der Schlüssel steht im #-Teil des Links und
+     verlässt den Browser nie; ohne ihn liegen hier nur unlesbare Daten. -->
+<style>
+  :root { color-scheme: light dark; --bg:#f6f3ee; --fg:#2b2724; --muted:#6f6760; --err:#9c2a1e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1d1b19; --fg:#ece6de; --muted:#a39a90; --err:#f0a294; } }
+  html, body { height:100%; margin:0; }
+  body { display:grid; place-items:center; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; padding:16px; box-sizing:border-box; }
+  #msg { max-width:28rem; text-align:center; color:var(--muted); }
+  #msg.err { color:var(--err); }
+  .dots::after { content:''; animation:d 1.2s steps(4) infinite; }
+  @keyframes d { 0% { content:''; } 25% { content:'.'; } 50% { content:'..'; } 75% { content:'...'; } }
+  @media (prefers-reduced-motion: reduce) { .dots::after { animation:none; content:'…'; } }
+</style>
+</head>
+<body>
+<p id="msg" role="status"><span class="dots">Einen Moment</span></p>
+<script>
+(async () => {
+  addEventListener('hashchange', () => location.reload()); // korrigierter Link; document.open() entfernt den Listener später wieder
+  const msg = document.getElementById('msg');
+  const fail = t => { msg.textContent = t; msg.className = 'err'; };
+  const k = (location.hash.match(/[#&]k=([A-Za-z0-9_-]{43})(?:&|$)/) || [])[1];
+  if (!k) return fail('Dieser Link ist unvollständig. Bitte den vollständigen Link aus der Bewerbung öffnen.');
+  if (!window.crypto || !crypto.subtle) return fail('Dieser Browser kann die Seite nicht öffnen. Bitte einen aktuellen Browser verwenden.');
+  let key;
+  try {
+    const raw = Uint8Array.from(atob(k.replace(/-/g, '+').replace(/_/g, '/') + '='), c => c.charCodeAt(0));
+    key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+  } catch (e) { return fail('Dieser Link ist ungültig.'); }
+  const get = async f => {
+    const r = await fetch('data/' + f + '.bin', { cache: 'no-cache' });
+    if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status), { net: true });
+    const b = new Uint8Array(await r.arrayBuffer());
+    return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.subarray(0, 12) }, key, b.subarray(12));
+  };
+  const blob = (buf, type) => URL.createObjectURL(new Blob([buf], { type }));
+  try {
+    const man = JSON.parse(new TextDecoder().decode(await get('m')));
+    const assets = window.__ASSETS = {};
+    const [page] = await Promise.all([get(man.page), ...man.eager.map(async a => { assets[a.path] = blob(await get(a.file), a.type); })]);
+    // Große Dateien (die Unterlagen) erst nach dem Start laden, damit sie den Spielbeginn nicht bremsen.
+    for (const a of man.lazy) {
+      const p = assets[a.path] = new Promise(r => setTimeout(r, 3000)).then(() => get(a.file)).then(b => ({ url: blob(b, a.type), name: a.name }));
+      p.catch(() => {});
+    }
+    document.open();
+    document.write(new TextDecoder().decode(page));
+    document.close();
+  } catch (e) {
+    fail(e.net ? 'Die Seite konnte nicht geladen werden. Bitte die Verbindung prüfen und neu laden.' : 'Dieser Link ist ungültig oder nicht mehr aktuell.');
+  }
+})();
+</script>
+</body>
+</html>
